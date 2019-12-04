@@ -129,14 +129,14 @@ class PDFKit(object):
         return list(self._command(path))
 
     @staticmethod
-    def handle_error(exit_code, stderr):
+    def handle_error(exit_code, stderr, ex_msg):
         if exit_code == 0:
             return
 
         # Sometimes wkhtmltopdf will exit with non-zero
         # even if it finishes generation.
-        # If will display 'Done' in the second last line
-        if stderr.splitlines()[-2].strip() == 'Done':
+        # If will display 'printing pages' and 'done' in the second last line
+        if all([_ in stderr.lower() for _ in ['printing pages', 'done']]):
             return
 
         if 'cannot connect to X server' in stderr:
@@ -148,19 +148,11 @@ class PDFKit(object):
         if 'Error' in stderr:
             raise IOError('wkhtmltopdf reported an error:\n' + stderr)
 
-        error_msg = stderr or 'Unknown Error'
+        error_msg = ex_msg or 'Unknown Error'
         raise IOError("wkhtmltopdf exited with non-zero code {0}. error:\n{1}".format(exit_code, error_msg))
 
-    def to_pdf(self, path=None):
+    def to_pdf(self, path=None, timeout=None):
         args = self.command(path)
-
-        result = subprocess.Popen(
-            args,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=self.environ
-        )
 
         # If the source is a string then we will pipe it into wkhtmltopdf.
         # If we want to add custom CSS to file then we read input file to
@@ -173,11 +165,27 @@ class PDFKit(object):
         else:
             input = None
 
-        stdout, stderr = result.communicate(input=input)
-        stderr = stderr or stdout
+        try:
+            ret = subprocess.run(
+                args,
+                input=input,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=self.environ,
+                timeout=timeout
+            )
+            stderr = ret.stderr or ret.stdout
+            stdout = ret.stdout
+            exit_code = ret.returncode
+            ex_msg = None
+        except Exception as ex:
+            stderr = ex.stderr or ex.stdout
+            stdout = ex.stdout
+            exit_code = 1
+            ex_msg = ex
+
         stderr = stderr.decode('utf-8', errors='replace')
-        exit_code = result.returncode
-        self.handle_error(exit_code, stderr)
+        self.handle_error(exit_code, stderr, ex_msg)
 
         # Since wkhtmltopdf sends its output to stderr we will capture it
         # and properly send to stdout

@@ -9,3 +9,8 @@ pdfkit.egg-info
 # Tests
 .tox
 .python-version
+
+# eclipse
+.settings/
+.project
+.pydevproject
